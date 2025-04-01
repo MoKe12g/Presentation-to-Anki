@@ -1,29 +1,32 @@
+import json
 import os
+import random
+import re
+import sys
+import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
-import threading
-import random
-from pptx import Presentation
+
 import PyPDF2
-import fitz  # PyMuPDF for better PDF extraction
+# removed (outdated) fitz import because of https://github.com/pymupdf/PyMuPDF/issues/1537
 import genanki
-import anthropic
-import json
-import re
-import time
+import pymupdf  # PyMuPDF for better PDF extraction
+from deepseek import DeepSeekAPI
 from dotenv import load_dotenv
 
-class ClaudeEnhancedConverter:
+
+class DeepSeekEnhancedConverter:
     def __init__(self, api_key):
-        # Initialize Claude API client
-        self.client = anthropic.Anthropic(api_key=api_key)
+        # Initialize AI client
+        self.client = DeepSeekAPI(api_key=api_key)
         
         # Create a unique model ID for Anki
         self.model_id = random.randrange(1 << 30, 1 << 31)
         # Define the card template
         self.model = genanki.Model(
             self.model_id,
-            'Claude-Enhanced Presentation Card',
+            'AI Presentation Card',
             fields=[
                 {'name': 'Question'},
                 {'name': 'Answer'},
@@ -38,49 +41,13 @@ class ClaudeEnhancedConverter:
                 },
             ])
     
-    def extract_from_pptx(self, pptx_path, progress_callback=None):
-        """Extract text from PowerPoint presentation"""
-        slides_content = []
-        prs = Presentation(pptx_path)
-        total_slides = len(prs.slides)
-        
-        for i, slide in enumerate(prs.slides, 1):
-            if progress_callback:
-                progress_callback(10 + (i / total_slides * 20), f"Extracting slide {i}/{total_slides}...")
-                
-            slide_title = ""
-            slide_content = ""
-            
-            # Extract slide title and content
-            for shape in slide.shapes:
-                if hasattr(shape, "text"):
-                    if shape.text.strip():
-                        if not slide_title and shape.text.strip():
-                            slide_title = shape.text.strip()
-                        else:
-                            slide_content += shape.text.strip() + "\n"
-            
-            # Store slide info even if title or content is empty
-            slides_content.append({
-                'title': slide_title,
-                'content': slide_content,
-                'slide_num': i
-            })
-            
-            # Debug info
-            print(f"Extracted PPTX Slide {i}:")
-            print(f"  Title: {slide_title}")
-            print(f"  Content length: {len(slide_content)}")
-        
-        return slides_content
-    
     def extract_from_pdf(self, pdf_path, progress_callback=None):
         """Extract text from PDF presentation using PyMuPDF for better extraction"""
         slides_content = []
         
         # Try PyMuPDF first (better extraction)
         try:
-            doc = fitz.open(pdf_path)
+            doc = pymupdf.open(pdf_path)
             total_pages = len(doc)
             
             for i, page in enumerate(doc, 1):
@@ -155,7 +122,7 @@ class ClaudeEnhancedConverter:
         return slides_content
     
     def clean_slide_content(self, slide):
-        """Clean and prepare slide content for Claude API"""
+        """Clean and prepare slide content for DeepSeek API"""
         # Remove common header/footer patterns
         title = slide['title']
         content = slide['content']
@@ -183,9 +150,9 @@ class ClaudeEnhancedConverter:
             'content': content,
             'slide_num': slide['slide_num']
         }
-    
-    def generate_flashcards_with_claude(self, slides_content, progress_callback=None):
-        """Use Claude to generate flashcards from slide content"""
+
+    def generate_flashcards_with_deepseek(self, slides_content, progress_callback=None):
+        """Use DeepSeek to generate flashcards from slide content"""
         all_cards = []
         total_slides = len(slides_content)
         processed_slides = 0
@@ -208,15 +175,15 @@ class ClaudeEnhancedConverter:
                 
             # Combine title and content for context
             full_text = f"Title: {cleaned_slide['title']}\n\nContent: {cleaned_slide['content']}"
-            
-            # Generate flashcards using Claude with retries
+
+            # Generate flashcards using DeepSeek with retries
             max_retries = 3
             retry_count = 0
             success = False
             
             while retry_count < max_retries and not success:
                 try:
-                    cards = self._ask_claude_for_cards(full_text)
+                    cards = self._ask_ai_for_cards(full_text)
                     
                     # Add slide reference to each card
                     for card in cards:
@@ -231,8 +198,8 @@ class ClaudeEnhancedConverter:
                     retry_count += 1
                     print(f"Error generating cards for slide {cleaned_slide['slide_num']} (attempt {retry_count}): {e}")
                     time.sleep(1)  # Brief pause before retry
-            
-            # Create a basic card if all Claude attempts failed
+
+            # Create a basic card if all DeepSeek attempts failed
             if not success:
                 print(f"Falling back to basic card for slide {cleaned_slide['slide_num']}")
                 if cleaned_slide['title']:
@@ -243,13 +210,13 @@ class ClaudeEnhancedConverter:
                         'question': question,
                         'answer': answer,
                         'slide': f"Slide {cleaned_slide['slide_num']}",
-                        'context': "Auto-generated (Claude API failed)"
+                        'context': "Auto-generated (DeepSeek API failed)"
                     })
         
         return all_cards
-    
-    def _ask_claude_for_cards(self, slide_text):
-        """Ask Claude to generate question-answer pairs from the slide text"""
+
+    def _ask_ai_for_cards(self, slide_text):
+        """Ask Ai to generate question-answer pairs from the slide text"""
         prompt = """
         Please analyze this slide content from an educational presentation and create 1-5 Anki flashcards based on the key concepts.
         
@@ -269,20 +236,19 @@ class ClaudeEnhancedConverter:
         
         If there's not enough meaningful content to create flashcards, return an empty array: []
         """
-        
-        # Using Claude API
-        response = self.client.messages.create(
-            model="claude-3-7-sonnet-20250219",
-            max_tokens=1000,
-            temperature=0.7,
-            system="You create high-quality flashcards from educational content. Always respond with valid JSON.",
-            messages=[
-                {"role": "user", "content": prompt.format(slide_text=slide_text)}
-            ]
-        )
+
+        conversion_prompt = [
+            {"role": "system",
+             "content": "You create high-quality flashcards from educational content. Always respond with valid JSON."},
+            {"role": "user", "content": prompt.format(slide_text=slide_text)}
+        ]
+        kwargs = {'max_tokens': 8192, 'temperature': 0.7, }
+
+        # Using AI API
+        response = self.client.chat_completion(conversion_prompt, **kwargs)
         
         # Extract the response text
-        cards_text = response.content[0].text
+        cards_text = response
         
         # Process the response to extract cards
         try:
@@ -353,18 +319,16 @@ class ClaudeEnhancedConverter:
         # Extract content
         if progress_callback:
             progress_callback(10, "Extracting slides...")
-            
-        if file_extension == '.pptx':
-            slides_content = self.extract_from_pptx(file_path, progress_callback)
-        elif file_extension == '.pdf':
+
+        if file_extension == '.pdf':
             slides_content = self.extract_from_pdf(file_path, progress_callback)
         else:
             raise ValueError(f"Unsupported file format: {file_extension}")
-        
-        # Generate cards using Claude
+
+        # Generate cards using DeepSeek
         if progress_callback:
-            progress_callback(30, "Generating flashcards with Claude...")
-        cards = self.generate_flashcards_with_claude(slides_content, progress_callback)
+            progress_callback(30, "Generating flashcards with DeepSeek...")
+        cards = self.generate_flashcards_with_deepseek(slides_content, progress_callback)
         
         # Create Anki deck
         if progress_callback:
@@ -396,11 +360,11 @@ class AnkiConverterApp(tk.Tk):
         load_dotenv()
         
         # Get API key from environment variables
-        self.api_key = os.getenv("CLAUDE_API_KEY")
+        self.api_key = os.getenv("DEEPSEEK_API_KEY")
         
         # Check if API key is available
         if not self.api_key:
-            print("Warning: CLAUDE_API_KEY not found in environment variables!")
+            print("Warning: DEEPSEEK_API_KEY not found in environment variables!")
         
         self.title("Presentation to Anki Flashcards Converter")
         self.geometry("700x800")
@@ -423,15 +387,15 @@ class AnkiConverterApp(tk.Tk):
             api_frame.pack(fill=tk.X, padx=10, pady=10)
             
             self.api_key_var = tk.StringVar()
-            ttk.Label(api_frame, text="Claude API Key:").grid(row=0, column=0, padx=5, pady=10, sticky=tk.W)
+            ttk.Label(api_frame, text="Deepseek API Key:").grid(row=0, column=0, padx=5, pady=10, sticky=tk.W)
             api_key_entry = ttk.Entry(api_frame, textvariable=self.api_key_var, width=40, show="*")
             api_key_entry.grid(row=0, column=1, padx=5, pady=10, sticky=tk.W)
-            
-            ttk.Label(api_frame, text="Note: For better security, set CLAUDE_API_KEY in a .env file").grid(
+
+            ttk.Label(api_frame, text="Note: For better security, set DEEPSEEK_API_KEY in a .env file").grid(
                 row=1, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
         
         # File selection frame
-        file_frame = ttk.LabelFrame(main_frame, text="Presentation/PDF File")
+        file_frame = ttk.LabelFrame(main_frame, text="PDF File")
         file_frame.pack(fill=tk.X, padx=10, pady=10)
         
         # File path entry
@@ -469,12 +433,12 @@ class AnkiConverterApp(tk.Tk):
         
         # Instructions label
         instructions = """
-        1. Click "Browse" to select your PowerPoint (.pptx) or PDF (.pdf) presentation
+        1. Click "Browse" to select your PDF (.pdf) presentation
         2. Enter a name for your Anki deck
         3. Click "Convert to Anki" to generate flashcards
         4. The Anki package (.apkg) will be saved to your Downloads folder
         
-        Note: This application uses Claude AI to generate intelligent flashcards from your slides.
+        Note: This application uses Deepseek AI to generate intelligent flashcards from your slides.
         """
         
         instructions_label = ttk.Label(drop_frame, text=instructions, font=("Arial", 11), justify=tk.LEFT)
@@ -497,7 +461,7 @@ class AnkiConverterApp(tk.Tk):
     def browse_file(self):
         file_path = filedialog.askopenfilename(
             title="Select Presentation",
-            filetypes=[("Presentation files", "*.pptx;*.pdf"), ("All files", "*.*")]
+            filetypes=[("Presentation files", "*.pdf"), ("All files", "*.*")]
         )
         if file_path:
             self.file_path_var.set(file_path)
@@ -528,7 +492,8 @@ class AnkiConverterApp(tk.Tk):
             api_key = self.api_key_var.get()
         
         if not api_key:
-            messagebox.showerror("Error", "Claude API key is required. Please set CLAUDE_API_KEY in a .env file or enter it above.")
+            messagebox.showerror("Error",
+                                 "Deepseek API key is required. Please set DEEPSEEK_API_KEY in a .env file or enter it above.")
             return
         
         # Disable the convert button during conversion
@@ -544,7 +509,7 @@ class AnkiConverterApp(tk.Tk):
         def run_conversion():
             try:
                 # Initialize the converter with the API key
-                converter = ClaudeEnhancedConverter(api_key)
+                converter = DeepSeekEnhancedConverter(api_key)
                 
                 # Process the file
                 num_cards, output_path = converter.process_file(
@@ -577,5 +542,18 @@ class AnkiConverterApp(tk.Tk):
 
 
 if __name__ == "__main__":
-    app = AnkiConverterApp()
-    app.mainloop()
+    if sys.argv.__len__() > 1 and sys.argv[1].lower() == "nogui":
+        pdf_file = sys.argv[2]
+        deck_name = sys.argv[3]
+        api_key = os.environ["DEEPSEEK_API_KEY"]
+
+        converter = DeepSeekEnhancedConverter(api_key)
+
+        # Process the file
+        num_cards, output_path = converter.process_file(
+            pdf_file,
+            deck_name
+        )
+    else:
+        app = AnkiConverterApp()
+        app.mainloop()
