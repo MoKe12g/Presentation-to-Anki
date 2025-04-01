@@ -16,7 +16,7 @@ from deepseek import DeepSeekAPI
 from dotenv import load_dotenv
 
 
-class ClaudeEnhancedConverter:
+class DeepSeekEnhancedConverter:
     def __init__(self, api_key):
         # Initialize AI client
         self.client = DeepSeekAPI(api_key=api_key)
@@ -122,7 +122,7 @@ class ClaudeEnhancedConverter:
         return slides_content
     
     def clean_slide_content(self, slide):
-        """Clean and prepare slide content for Claude API"""
+        """Clean and prepare slide content for DeepSeek API"""
         # Remove common header/footer patterns
         title = slide['title']
         content = slide['content']
@@ -150,9 +150,9 @@ class ClaudeEnhancedConverter:
             'content': content,
             'slide_num': slide['slide_num']
         }
-    
-    def generate_flashcards_with_claude(self, slides_content, progress_callback=None):
-        """Use Claude to generate flashcards from slide content"""
+
+    def generate_flashcards_with_deepseek(self, slides_content, progress_callback=None):
+        """Use DeepSeek to generate flashcards from slide content"""
         all_cards = []
         total_slides = len(slides_content)
         processed_slides = 0
@@ -175,8 +175,8 @@ class ClaudeEnhancedConverter:
                 
             # Combine title and content for context
             full_text = f"Title: {cleaned_slide['title']}\n\nContent: {cleaned_slide['content']}"
-            
-            # Generate flashcards using Claude with retries
+
+            # Generate flashcards using DeepSeek with retries
             max_retries = 3
             retry_count = 0
             success = False
@@ -198,8 +198,8 @@ class ClaudeEnhancedConverter:
                     retry_count += 1
                     print(f"Error generating cards for slide {cleaned_slide['slide_num']} (attempt {retry_count}): {e}")
                     time.sleep(1)  # Brief pause before retry
-            
-            # Create a basic card if all Claude attempts failed
+
+            # Create a basic card if all DeepSeek attempts failed
             if not success:
                 print(f"Falling back to basic card for slide {cleaned_slide['slide_num']}")
                 if cleaned_slide['title']:
@@ -210,7 +210,7 @@ class ClaudeEnhancedConverter:
                         'question': question,
                         'answer': answer,
                         'slide': f"Slide {cleaned_slide['slide_num']}",
-                        'context': "Auto-generated (Claude API failed)"
+                        'context': "Auto-generated (DeepSeek API failed)"
                     })
         
         return all_cards
@@ -319,18 +319,16 @@ class ClaudeEnhancedConverter:
         # Extract content
         if progress_callback:
             progress_callback(10, "Extracting slides...")
-            
-        if file_extension == '.pptx':
-            slides_content = self.extract_from_pptx(file_path, progress_callback)
-        elif file_extension == '.pdf':
+
+        if file_extension == '.pdf':
             slides_content = self.extract_from_pdf(file_path, progress_callback)
         else:
             raise ValueError(f"Unsupported file format: {file_extension}")
-        
-        # Generate cards using Claude
+
+        # Generate cards using DeepSeek
         if progress_callback:
-            progress_callback(30, "Generating flashcards with Claude...")
-        cards = self.generate_flashcards_with_claude(slides_content, progress_callback)
+            progress_callback(30, "Generating flashcards with DeepSeek...")
+        cards = self.generate_flashcards_with_deepseek(slides_content, progress_callback)
         
         # Create Anki deck
         if progress_callback:
@@ -389,15 +387,15 @@ class AnkiConverterApp(tk.Tk):
             api_frame.pack(fill=tk.X, padx=10, pady=10)
             
             self.api_key_var = tk.StringVar()
-            ttk.Label(api_frame, text="Claude API Key:").grid(row=0, column=0, padx=5, pady=10, sticky=tk.W)
+            ttk.Label(api_frame, text="Deepseek API Key:").grid(row=0, column=0, padx=5, pady=10, sticky=tk.W)
             api_key_entry = ttk.Entry(api_frame, textvariable=self.api_key_var, width=40, show="*")
             api_key_entry.grid(row=0, column=1, padx=5, pady=10, sticky=tk.W)
-            
-            ttk.Label(api_frame, text="Note: For better security, set CLAUDE_API_KEY in a .env file").grid(
+
+            ttk.Label(api_frame, text="Note: For better security, set DEEPSEEK_API_KEY in a .env file").grid(
                 row=1, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
         
         # File selection frame
-        file_frame = ttk.LabelFrame(main_frame, text="Presentation/PDF File")
+        file_frame = ttk.LabelFrame(main_frame, text="PDF File")
         file_frame.pack(fill=tk.X, padx=10, pady=10)
         
         # File path entry
@@ -435,12 +433,12 @@ class AnkiConverterApp(tk.Tk):
         
         # Instructions label
         instructions = """
-        1. Click "Browse" to select your PowerPoint (.pptx) or PDF (.pdf) presentation
+        1. Click "Browse" to select your PDF (.pdf) presentation
         2. Enter a name for your Anki deck
         3. Click "Convert to Anki" to generate flashcards
         4. The Anki package (.apkg) will be saved to your Downloads folder
         
-        Note: This application uses Claude AI to generate intelligent flashcards from your slides.
+        Note: This application uses Deepseek AI to generate intelligent flashcards from your slides.
         """
         
         instructions_label = ttk.Label(drop_frame, text=instructions, font=("Arial", 11), justify=tk.LEFT)
@@ -494,7 +492,8 @@ class AnkiConverterApp(tk.Tk):
             api_key = self.api_key_var.get()
         
         if not api_key:
-            messagebox.showerror("Error", "Claude API key is required. Please set CLAUDE_API_KEY in a .env file or enter it above.")
+            messagebox.showerror("Error",
+                                 "Deepseek API key is required. Please set DEEPSEEK_API_KEY in a .env file or enter it above.")
             return
         
         # Disable the convert button during conversion
@@ -510,7 +509,7 @@ class AnkiConverterApp(tk.Tk):
         def run_conversion():
             try:
                 # Initialize the converter with the API key
-                converter = ClaudeEnhancedConverter(api_key)
+                converter = DeepSeekEnhancedConverter(api_key)
                 
                 # Process the file
                 num_cards, output_path = converter.process_file(
@@ -548,7 +547,7 @@ if __name__ == "__main__":
         deck_name = sys.argv[3]
         api_key = os.environ["DEEPSEEK_API_KEY"]
 
-        converter = ClaudeEnhancedConverter(api_key)
+        converter = DeepSeekEnhancedConverter(api_key)
 
         # Process the file
         num_cards, output_path = converter.process_file(
