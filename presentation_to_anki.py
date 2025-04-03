@@ -31,19 +31,22 @@ class DeepSeekEnhancedConverter:
                 {'name': 'Question'},
                 {'name': 'Answer'},
                 {'name': 'Slide'},
+                {'name': 'Filename'},
                 {'name': 'Context'},
             ],
             templates=[
                 {
                     'name': 'Card',
                     'qfmt': '{{Question}}',
-                    'afmt': '{{FrontSide}}<hr id="answer">{{Answer}}<br><br><i>Slide: {{Slide}}</i>',
+                    'afmt': '{{FrontSide}}<hr id="answer">{{Answer}}<br><br><i>Slide: {{Slide}}, Generated from File: {{Filename}} </i>',
                 },
             ])
     
     def extract_from_pdf(self, pdf_path, progress_callback=None):
         """Extract text from PDF presentation using PyMuPDF for better extraction"""
         slides_content = []
+
+        filename = os.path.basename(pdf_path)
         
         # Try PyMuPDF first (better extraction)
         try:
@@ -75,7 +78,8 @@ class DeepSeekEnhancedConverter:
                 slides_content.append({
                     'title': title,
                     'content': content,
-                    'slide_num': i
+                    'slide_num': i,
+                    'filename': filename,
                 })
                 
                 # Debug info
@@ -111,7 +115,8 @@ class DeepSeekEnhancedConverter:
                     slides_content.append({
                         'title': title,
                         'content': content,
-                        'slide_num': i+1
+                        'slide_num': i+1,
+                        'filename': filename,
                     })
                     
                     # Debug info
@@ -148,7 +153,8 @@ class DeepSeekEnhancedConverter:
         return {
             'title': title,
             'content': content,
-            'slide_num': slide['slide_num']
+            'slide_num': slide['slide_num'],
+            'filename': slide['filename'],
         }
 
     def generate_flashcards_with_deepseek(self, slides_content, progress_callback=None):
@@ -188,6 +194,7 @@ class DeepSeekEnhancedConverter:
                     # Add slide reference to each card
                     for card in cards:
                         card['slide'] = f"Slide {cleaned_slide['slide_num']}"
+                        card['filename'] = f"Filename {cleaned_slide['filename']}"
                         card['context'] = cleaned_slide['title']
                     
                     all_cards.extend(cards)
@@ -210,7 +217,8 @@ class DeepSeekEnhancedConverter:
                         'question': question,
                         'answer': answer,
                         'slide': f"Slide {cleaned_slide['slide_num']}",
-                        'context': "Auto-generated (DeepSeek API failed)"
+                        'context': "Auto-generated (DeepSeek API failed)",
+                        'filename': cleaned_slide['filename'],
                     })
         
         return all_cards
@@ -304,6 +312,7 @@ class DeepSeekEnhancedConverter:
                     card['question'], 
                     card['answer'], 
                     card['slide'],
+                    card['filename'],
                     card.get('context', '')
                 ]
             )
